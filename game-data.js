@@ -12,7 +12,7 @@ const GAME = {
   title: "로지스틱 익스체인지",
   startCash: 100,       // 시작 자본(코인)
   startPrice: 10.0,     // 전 종목 시작가
-  roundSeconds: 60,     // 매매 창 시간(초)
+  roundSeconds: 200,     // 매매 창 시간(초)
   totalRounds: 10,
   minReasonLen: 10,     // 매매 이유 최소 글자 수
   maxGroups: 8,
