@@ -22,6 +22,7 @@
   <div class="spacer"></div>
   <span class="chip" id="chipTimer" style="display:none;color:var(--green)"></span>
   <span class="conn" id="connDot"><span class="dot"></span><span id="connTxt">연결 확인 중</span></span>
+  <button class="btn btn-sm btn-ghost" id="btnLeave" style="display:none">나가기</button>
 </div>
 
 <div class="wrap">
@@ -56,6 +57,8 @@
     <div style="font-size:48px" id="waitEmoji">⏳</div>
     <h2 id="waitTitle">기다리는 중…</h2>
     <p class="muted" id="waitMsg"></p>
+    <button class="btn btn-primary btn-big hidden mt" id="waitBtn"></button>
+    <button class="btn hidden mt" id="waitBtn2"></button>
   </section>
 
   <!-- ═══ 매매 화면 ═══ -->
@@ -170,6 +173,7 @@ let online = false;        // 실시간 연결 여부
 // 상단 바
 // ─────────────────────────────────────────────
 function renderTop(){
+  $("#btnLeave").style.display = L.joined ? "" : "none";
   if(L.joined){
     $("#chipTeam").style.display=""; $("#chipTeam").textContent = "🏢 " + L.name;
     $("#chipRound").style.display=""; $("#chipRound").innerHTML = "라운드 <b>"+L.round+"</b>/"+GAME.totalRounds;
@@ -208,6 +212,12 @@ $("#btnJoin").addEventListener("click", async () => {
           gid = k; break;
         }
       }
+      // 다른 방(또는 다른 이름)으로 입장하면 이전 게임 기록을 초기화
+      if(L.room !== room || L.name !== name){
+        L.cash = GAME.startCash; L.holdings = emptyHoldings();
+        L.prices = initialPrices(); L.round = 1; L.lastRevealedRound = 0;
+        L.log = {}; L.offPhase = "trade"; tradeBuiltFor = 0;
+      }
       if(!gid){
         if(Object.keys(groups).length >= (meta.groupCount || GAME.maxGroups)){
           msg.textContent = "정원이 가득 찼습니다. (모둠 " + meta.groupCount + "개)"; return;
@@ -229,7 +239,9 @@ $("#btnJoin").addEventListener("click", async () => {
   } else {
     // 처음부터 오프라인: 로컬 게임 시작
     L.joined = true; L.live = false; L.room = room || "----"; L.name = name; L.pin = pin;
-    L.round = 1; L.offPhase = "trade";
+    L.cash = GAME.startCash; L.holdings = emptyHoldings();
+    L.prices = initialPrices(); L.log = {}; L.lastRevealedRound = 0;
+    L.round = 1; L.offPhase = "trade"; tradeBuiltFor = 0;
     save();
     enterOfflineFlow();
   }
@@ -241,9 +253,8 @@ $("#btnJoin").addEventListener("click", async () => {
 function startWatching(){
   RT.watch("rooms/"+L.room+"/state", (st) => {
     if(!st){
-      // 방이 닫힘
-      showWait("🚪","방이 종료되었습니다","선생님이 방을 닫았습니다. 성적표는 아래에서 볼 수 있어요.");
-      if(Object.keys(L.log).length) setTimeout(showReport, 1500);
+      // 방이 닫혔거나 존재하지 않음 → 새로 입장할 수 있게
+      showRoomClosed();
       return;
     }
     serverState = st;
@@ -296,9 +307,35 @@ function showWait(emoji, title, msg){
   $("#waitEmoji").textContent = emoji;
   $("#waitTitle").textContent = title;
   $("#waitMsg").textContent = msg;
+  $("#waitBtn").classList.add("hidden");
+  $("#waitBtn2").classList.add("hidden");
   show("scrWait");
   stopTimer();
   renderTop();
+}
+
+// 저장된 모둠 정보를 지우고 입장 화면으로
+function resetAndRejoin(){
+  try{ localStorage.removeItem(LS_KEY); }catch(e){}
+  location.reload();
+}
+$("#btnLeave").addEventListener("click", () => {
+  if(confirm("이 방에서 나가고 처음부터 입장할까요? (성적표 기록이 지워집니다)")) resetAndRejoin();
+});
+
+// 방이 사라졌을 때: 새로 입장 버튼 (+ 기록 있으면 성적표 보기)
+function showRoomClosed(){
+  showWait("🚪","방을 찾을 수 없습니다","선생님이 방을 종료했거나 새 방을 열었습니다. 새 방 코드로 다시 입장하세요.");
+  const b = $("#waitBtn");
+  b.classList.remove("hidden");
+  b.textContent = "🔄 새로 입장하기";
+  b.onclick = resetAndRejoin;
+  if(Object.keys(L.log).length){
+    const b2 = $("#waitBtn2");
+    b2.classList.remove("hidden");
+    b2.textContent = "📋 지금까지의 성적표 보기";
+    b2.onclick = showReport;
+  }
 }
 
 // ─────────────────────────────────────────────
