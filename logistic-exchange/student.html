@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>로지스틱 익스체인지 — 모둠 화면</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="config.js"></script>
+<script src="game-data.js"></script>
+<script src="realtime.js"></script>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="title">📈 로지스틱</div>
+  <span class="chip" id="chipTeam" style="display:none"></span>
+  <span class="chip" id="chipRound" style="display:none"></span>
+  <span class="chip" id="chipCash" style="display:none"></span>
+  <span class="chip" id="chipAsset" style="display:none"></span>
+  <div class="spacer"></div>
+  <span class="chip" id="chipTimer" style="display:none;color:var(--green)"></span>
+  <span class="conn" id="connDot"><span class="dot"></span><span id="connTxt">연결 확인 중</span></span>
+</div>
+
+<div class="wrap">
+
+  <!-- 오프라인 배너 + 뉴스 코드 입력 -->
+  <div class="offline-banner hidden" id="offlineBanner">
+    🔴 오프라인 모드 — 선생님 화면의 <b>라운드 코드</b>(예: R-3)를 입력하면 시장이 반응합니다.
+    <div class="row hidden" id="codeRow">
+      <input type="text" id="codeInput" placeholder="R-1" autocomplete="off">
+      <button class="btn btn-amber" id="codeBtn">코드 적용</button>
+    </div>
+    <div class="muted mt" id="offlineHint"></div>
+  </div>
+
+  <!-- ═══ 입장 화면 ═══ -->
+  <section id="scrJoin" class="panel" style="max-width:480px;margin:40px auto">
+    <h2>투자회사 입장</h2>
+    <label>방 코드 (4자리)</label>
+    <input type="tel" id="inRoom" maxlength="4" placeholder="예: 1234">
+    <label>모둠(투자회사) 이름</label>
+    <input type="text" id="inName" maxlength="12" placeholder="예: 1모둠 번개운송">
+    <label>모둠 PIN (2자리 — 재접속할 때 필요!)</label>
+    <input type="tel" id="inPin" maxlength="2" placeholder="예: 07">
+    <div class="mt">
+      <button class="btn btn-primary btn-big" style="width:100%" id="btnJoin">입장하기</button>
+    </div>
+    <p class="muted mt" id="joinMsg"></p>
+  </section>
+
+  <!-- ═══ 대기 화면 ═══ -->
+  <section id="scrWait" class="panel hidden center" style="max-width:560px;margin:40px auto;padding:40px 20px">
+    <div style="font-size:48px" id="waitEmoji">⏳</div>
+    <h2 id="waitTitle">기다리는 중…</h2>
+    <p class="muted" id="waitMsg"></p>
+  </section>
+
+  <!-- ═══ 매매 화면 ═══ -->
+  <section id="scrTrade" class="hidden">
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h2 style="margin:0">📰 라운드 <span id="trRound"></span> 속보</h2>
+        <div class="timer timer-sm" id="trTimer"></div>
+      </div>
+      <p class="muted">셋 중 시장을 움직이는 뉴스는 <b style="color:var(--amber)">하나</b>.
+        어느 것이고, 어느 수단이 위험하고 어느 수단이 기회인가? <b>카드를 눌러 진짜 뉴스를 고르세요.</b></p>
+      <div class="news-grid" id="trNews"></div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2 style="margin:0">💹 매매</h2>
+        <span class="chip">주문 후 현금 <b id="trCashAfter"></b>c</span>
+      </div>
+      <p class="muted">[+] 사기 / [−] 팔기 · 정수 주 단위 · 공매도 없음 · 수수료 없음 · [★특징]을 눌러 1차시 별점표 확인</p>
+      <div class="stock-grid" id="trStocks"></div>
+    </div>
+
+    <div class="panel">
+      <h2>✍️ 매매 이유 <span class="muted">(필수 · 10자 이상)</span></h2>
+      <p class="muted">"<b>어느 뉴스</b> 때문에, <b>어느 수단</b>이 <b>왜</b> 오르고/내리나" — 수단의 <b>특징(속도·수송량·비용·거리·날씨·접근성)</b>으로 설명해 보세요. 관망할 때도 이유를 씁니다.</p>
+      <textarea id="trReason" rows="3" placeholder="예: 유가 급등 뉴스 때문에 연료비 비중이 큰 트럭은 내리고, 연료를 안 쓰는 파이프라인이 오를 것이다."></textarea>
+      <div class="muted" style="text-align:right" id="reasonCount">0자</div>
+    </div>
+
+    <div class="confirm-bar">
+      <button class="btn btn-green btn-big" id="btnConfirm">✅ 매매 확정</button>
+      <p class="muted center" id="confirmMsg" style="margin:6px 0 0"></p>
+    </div>
+  </section>
+
+  <!-- ═══ 결과 화면 ═══ -->
+  <section id="scrResult" class="hidden">
+    <div class="panel">
+      <div class="judge" id="rsJudge"></div>
+      <div class="news-grid" id="rsNews"></div>
+      <div class="note-card"><div class="h">📖 해설 — 수송 수단의 특징으로 보면</div><div id="rsNote"></div></div>
+    </div>
+    <div class="panel">
+      <h2 class="center">이번 라운드 손익</h2>
+      <div class="pnl" id="rsPnl"></div>
+      <div class="price-board" id="rsPrices"></div>
+      <p class="muted center mt" id="rsHold"></p>
+    </div>
+    <div class="center mt" id="rsNextWrap">
+      <p class="muted" id="rsWaitMsg">선생님이 다음 라운드를 시작하면 자동으로 넘어갑니다…</p>
+      <button class="btn btn-primary btn-big hidden" id="btnNextOffline">➡️ 다음 라운드</button>
+    </div>
+  </section>
+
+  <!-- ═══ 최종 성적표 ═══ -->
+  <section id="scrReport" class="hidden">
+    <div class="panel center">
+      <h1>🏁 최종 성적표</h1>
+      <div style="font-size:22px;font-weight:800" id="rpName"></div>
+      <div class="pnl" id="rpAsset" style="color:var(--amber)"></div>
+      <div id="rpBadges"></div>
+    </div>
+    <div class="panel">
+      <h2>라운드별 기록</h2>
+      <div id="rpTimeline"></div>
+    </div>
+    <div class="panel center">
+      <button class="btn btn-primary btn-big" id="btnCopyReport">📋 성적표 텍스트 복사 (학습지용)</button>
+      <p class="muted mt">복사가 안 되면 화면을 스크린샷해서 학습지에 옮겨 적으세요.</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const SCREENS = ["scrJoin","scrWait","scrTrade","scrResult","scrReport"];
+function show(id){ SCREENS.forEach(x => $("#"+x).classList.toggle("hidden", x!==id)); }
+
+// ─────────────────────────────────────────────
+// 로컬 상태 (오프라인 폴백의 기반. 항상 미러 유지)
+// ─────────────────────────────────────────────
+const LS_KEY = "lx_student_v1";
+let L = {
+  joined:false, live:false,          // live: 서버 방에 입장했는가
+  room:"", gid:"", name:"", pin:"",
+  cash: GAME.startCash,
+  holdings: emptyHoldings(),
+  prices: initialPrices(),
+  round: 1,
+  lastRevealedRound: 0,
+  offPhase: "trade",                 // 오프라인 진행 단계: trade | code | result
+  log: {},                            // {round: {pick, correct, trades, reason, pricesAt, pnl, assetAfter, confirmed}}
+};
+function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(L)); }catch(e){} }
+function load(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(raw){ const o = JSON.parse(raw); if(o && o.joined) L = Object.assign(L, o); }
+  }catch(e){}
+}
+
+let serverState = null;   // 온라인일 때 rooms/{code}/state
+let pending = {};          // 이번 라운드 주문 {stockId: ±주}
+let pickKey = null;        // 선택한 뉴스 카드 키
+let timerIv = null;
+let online = false;        // 실시간 연결 여부
+
+// ─────────────────────────────────────────────
+// 상단 바
+// ─────────────────────────────────────────────
+function renderTop(){
+  if(L.joined){
+    $("#chipTeam").style.display=""; $("#chipTeam").textContent = "🏢 " + L.name;
+    $("#chipRound").style.display=""; $("#chipRound").innerHTML = "라운드 <b>"+L.round+"</b>/"+GAME.totalRounds;
+    $("#chipCash").style.display=""; $("#chipCash").innerHTML = "현금 <b>"+fmtCoin(L.cash)+"</b>c";
+    $("#chipAsset").style.display=""; $("#chipAsset").innerHTML = "총자산 <b>"+fmtCoin(calcAsset(L.cash,L.holdings,L.prices))+"</b>c";
+  }
+}
+function renderConn(){
+  $("#connDot").classList.toggle("on", online);
+  $("#connTxt").textContent = online ? "실시간 연결" : "오프라인";
+  $("#offlineBanner").classList.toggle("hidden", online || !L.joined);
+}
+
+// ─────────────────────────────────────────────
+// 입장
+// ─────────────────────────────────────────────
+$("#btnJoin").addEventListener("click", async () => {
+  const room = $("#inRoom").value.trim();
+  const name = $("#inName").value.trim();
+  const pin  = $("#inPin").value.trim();
+  const msg = $("#joinMsg");
+  if(!name){ msg.textContent = "모둠 이름을 입력하세요."; return; }
+  if(!/^\d{2}$/.test(pin)){ msg.textContent = "PIN은 숫자 2자리입니다."; return; }
+
+  if(RT.isOnline()){
+    if(!/^\d{4}$/.test(room)){ msg.textContent = "방 코드는 숫자 4자리입니다."; return; }
+    msg.textContent = "입장 중…";
+    try{
+      const meta = await RT.get("rooms/"+room+"/meta");
+      if(!meta){ msg.textContent = "그 코드의 방이 없습니다. 코드를 확인하세요."; return; }
+      const groups = (await RT.get("rooms/"+room+"/groups")) || {};
+      let gid = null;
+      for(const k of Object.keys(groups)){
+        if(groups[k].name === name){
+          if(String(groups[k].pin) !== pin){ msg.textContent = "이미 있는 모둠 이름입니다. PIN이 다릅니다."; return; }
+          gid = k; break;
+        }
+      }
+      if(!gid){
+        if(Object.keys(groups).length >= (meta.groupCount || GAME.maxGroups)){
+          msg.textContent = "정원이 가득 찼습니다. (모둠 " + meta.groupCount + "개)"; return;
+        }
+        gid = RT.pushKey("rooms/"+room+"/groups");
+        await RT.set("rooms/"+room+"/groups/"+gid, {
+          name, pin, cash: GAME.startCash, holdings: emptyHoldings(),
+          confirmed:false, joinedAt: Date.now(),
+        });
+      } else {
+        // 재입장: 서버의 자산을 이어받는다
+        const g = groups[gid];
+        L.cash = g.cash; L.holdings = Object.assign(emptyHoldings(), g.holdings||{});
+      }
+      L.joined = true; L.live = true; L.room = room; L.gid = gid; L.name = name; L.pin = pin;
+      save();
+      startWatching();
+    }catch(e){ console.error(e); msg.textContent = "입장 실패: " + e.message; }
+  } else {
+    // 처음부터 오프라인: 로컬 게임 시작
+    L.joined = true; L.live = false; L.room = room || "----"; L.name = name; L.pin = pin;
+    L.round = 1; L.offPhase = "trade";
+    save();
+    enterOfflineFlow();
+  }
+});
+
+// ─────────────────────────────────────────────
+// 온라인: 서버 상태 구독
+// ─────────────────────────────────────────────
+function startWatching(){
+  RT.watch("rooms/"+L.room+"/state", (st) => {
+    if(!st){
+      // 방이 닫힘
+      showWait("🚪","방이 종료되었습니다","선생님이 방을 닫았습니다. 성적표는 아래에서 볼 수 있어요.");
+      if(Object.keys(L.log).length) setTimeout(showReport, 1500);
+      return;
+    }
+    serverState = st;
+    if(online) applyServerState(st);
+  });
+  renderTop();
+}
+
+function applyServerState(st){
+  const phase = st.phase, round = st.round || 1;
+  L.round = round;
+
+  if(phase === "revealed"){
+    if(L.lastRevealedRound < round){
+      const oldPrices = Object.assign({}, L.prices);
+      L.prices = Object.assign({}, st.prices);
+      L.lastRevealedRound = round;
+      finishRound(round, oldPrices, L.prices);
+      save();
+    }
+    showResult(round, false);
+    return;
+  }
+
+  // revealed 이전 단계에서는 서버 가격 = 라운드 시작가
+  if(st.prices) L.prices = Object.assign({}, st.prices);
+
+  if(phase === "lobby"){
+    showWait("🏢","입장 완료!","선생님이 게임을 시작하면 자동으로 넘어갑니다.");
+  } else if(phase === "preview"){
+    showWait("📰","라운드 "+round+" 준비","곧 속보 3개가 동시에 공개됩니다. 준비하세요!");
+  } else if(phase === "trading"){
+    if(L.log[round] && L.log[round].confirmed){
+      showWait("🔒","매매 확정 완료","다른 회사들을 기다리는 중…");
+    } else {
+      showTrade(round, st.timerEnd);
+    }
+  } else if(phase === "locked"){
+    showWait("⏳","매매 마감","시장이 곧 반응합니다…");
+  } else if(phase === "finished"){
+    showReport();
+  }
+  renderTop();
+}
+
+// ─────────────────────────────────────────────
+// 화면: 대기
+// ─────────────────────────────────────────────
+function showWait(emoji, title, msg){
+  $("#waitEmoji").textContent = emoji;
+  $("#waitTitle").textContent = title;
+  $("#waitMsg").textContent = msg;
+  show("scrWait");
+  stopTimer();
+  renderTop();
+}
+
+// ─────────────────────────────────────────────
+// 화면: 매매
+// ─────────────────────────────────────────────
+let tradeBuiltFor = 0;
+function showTrade(round, timerEnd){
+  if(tradeBuiltFor !== round){
+    tradeBuiltFor = round;
+    pending = {}; pickKey = null;
+    STOCK_IDS.forEach(id => pending[id] = 0);
+    buildNewsCards(round);
+    buildStockCards();
+    $("#trReason").value = "";
+    $("#reasonCount").textContent = "0자";
+  }
+  $("#trRound").textContent = round;
+  show("scrTrade");
+  if(timerEnd) startTimer(timerEnd, $("#trTimer"), $("#chipTimer"));
+  else { $("#trTimer").textContent = ""; }
+  refreshTrade();
+  renderTop();
+}
+
+function buildNewsCards(round){
+  const box = $("#trNews"); box.innerHTML = "";
+  roundCards(round).forEach((c, i) => {
+    const div = document.createElement("div");
+    div.className = "news-card pickable";
+    div.dataset.key = c.key;
+    div.innerHTML = '<div class="tag">속보 '+(i+1)+'</div><h3>'+c.title+'</h3><p>'+c.body+'</p><span class="pickmark"></span>';
+    div.addEventListener("click", () => {
+      pickKey = c.key;
+      box.querySelectorAll(".news-card").forEach(n => {
+        const on = n.dataset.key === pickKey;
+        n.classList.toggle("picked", on);
+        n.querySelector(".pickmark").textContent = on ? "🔍✔" : "";
+      });
+      refreshTrade();
+    });
+    box.appendChild(div);
+  });
+}
+
+function buildStockCards(){
+  const box = $("#trStocks"); box.innerHTML = "";
+  STOCKS.forEach(s => {
+    const div = document.createElement("div");
+    div.className = "stock-card";
+    div.dataset.id = s.id;
+    const stars = Object.entries(s.stars).map(([k,v]) =>
+      '<span class="k">'+k+'</span>'+starStr(v)).join("<br>");
+    div.innerHTML =
+      '<div class="head"><span class="emoji">'+s.emoji+'</span><span class="nm">'+s.name+'</span>'+
+      '<span class="pr" data-r="pr"></span></div>'+
+      '<div class="sub"><span>보유 <b data-r="hold"></b>주</span><span class="pend" data-r="pend"></span></div>'+
+      '<div class="stepper"><button data-a="minus">−</button><div class="val" data-r="val"></div><button data-a="plus">＋</button></div>'+
+      '<button class="btn btn-sm btn-ghost" data-a="stars" style="margin-top:8px">★ 특징</button>'+
+      '<div class="stars-box">'+stars+'<br><span class="k" style="width:auto">※ 비용은 별이 많을수록 저렴</span></div>';
+    div.querySelector('[data-a=minus]').addEventListener("click", () => step(s.id, -1));
+    div.querySelector('[data-a=plus]').addEventListener("click", () => step(s.id, +1));
+    div.querySelector('[data-a=stars]').addEventListener("click", () => div.classList.toggle("show-stars"));
+    box.appendChild(div);
+  });
+}
+
+function cashAfterPending(){
+  let c = L.cash;
+  for(const id of STOCK_IDS) c -= (pending[id]||0) * L.prices[id];
+  return r1(c);
+}
+
+function step(id, d){
+  const np = (pending[id]||0) + d;
+  if(L.holdings[id] + np < 0) return;                       // 공매도 금지
+  const c = cashAfterPending() - d * L.prices[id];
+  if(d > 0 && c < -0.001) return;                            // 현금 부족
+  pending[id] = np;
+  refreshTrade();
+}
+
+function refreshTrade(){
+  const after = cashAfterPending();
+  $("#trCashAfter").textContent = fmtCoin(after);
+  document.querySelectorAll("#trStocks .stock-card").forEach(card => {
+    const id = card.dataset.id;
+    card.querySelector('[data-r=pr]').textContent = fmtCoin(L.prices[id]);
+    card.querySelector('[data-r=hold]').textContent = L.holdings[id];
+    card.querySelector('[data-r=val]').textContent = L.holdings[id] + (pending[id]||0);
+    const pd = card.querySelector('[data-r=pend]');
+    const p = pending[id]||0;
+    pd.textContent = p > 0 ? "+"+p+"주 사기" : p < 0 ? p+"주 팔기" : "";
+    pd.className = "pend " + (p>0?"buy":p<0?"sell":"");
+  });
+  const reason = $("#trReason").value.trim();
+  $("#reasonCount").textContent = reason.length + "자";
+  const traded = STOCK_IDS.some(id => pending[id] !== 0);
+  let msg = "";
+  if(!pickKey) msg = "① 시장을 움직일 뉴스 카드를 골라 주세요.";
+  else if(reason.length < GAME.minReasonLen) msg = "② 이유를 " + GAME.minReasonLen + "자 이상 써 주세요. (" + reason.length + "자)";
+  else if(!traded) msg = "매매 없이 확정하면 '관망'으로 기록됩니다.";
+  $("#confirmMsg").textContent = msg;
+  $("#btnConfirm").disabled = !pickKey || reason.length < GAME.minReasonLen;
+}
+$("#trReason").addEventListener("input", refreshTrade);
+
+// ─────────────────────────────────────────────
+// 매매 확정
+// ─────────────────────────────────────────────
+$("#btnConfirm").addEventListener("click", async () => {
+  const round = L.round;
+  const reason = $("#trReason").value.trim();
+  if(!pickKey || reason.length < GAME.minReasonLen) return;
+  if(online && serverState && serverState.phase !== "trading"){
+    alert("매매가 마감되었습니다!"); return;
+  }
+  // 체결: 라운드 시작가로 사고판다
+  const pricesAt = Object.assign({}, L.prices);
+  let cost = 0;
+  for(const id of STOCK_IDS) cost += (pending[id]||0) * pricesAt[id];
+  const newCash = r1(L.cash - cost);
+  if(newCash < -0.001){ alert("현금이 부족합니다."); return; }
+  const newHold = Object.assign({}, L.holdings);
+  for(const id of STOCK_IDS){
+    newHold[id] += (pending[id]||0);
+    if(newHold[id] < 0){ alert("보유하지 않은 주식은 팔 수 없습니다."); return; }
+  }
+  L.cash = newCash; L.holdings = newHold;
+  const trades = {};
+  for(const id of STOCK_IDS) if(pending[id]) trades[id] = pending[id];
+  L.log[round] = {
+    confirmed:true, pick: pickKey,
+    pickTitle: getCard(round, pickKey).title,
+    trades, reason, pricesAt,
+  };
+  save(); renderTop();
+
+  if(online){
+    try{
+      const upd = { cash: newCash, holdings: newHold, confirmed: true };
+      upd["trades/"+round] = { pick: pickKey, trades, reason, at: Date.now() };
+      await RT.update("rooms/"+L.room+"/groups/"+L.gid, upd);
+    }catch(e){ console.error("확정 전송 실패(오프라인 전환):", e); }
+    showWait("🔒","매매 확정 완료","다른 회사들을 기다리는 중…");
+  } else {
+    // 오프라인: 코드 입력 단계로
+    L.offPhase = "code"; save();
+    enterOfflineFlow();
+  }
+});
+
+// ─────────────────────────────────────────────
+// 라운드 정산 (온·오프 공통)
+// ─────────────────────────────────────────────
+function finishRound(round, oldPrices, newPrices){
+  const log = L.log[round] || (L.log[round] = { confirmed:false, pricesAt: oldPrices });
+  let pnl = 0;
+  for(const id of STOCK_IDS) pnl += L.holdings[id] * (newPrices[id] - (log.pricesAt ? log.pricesAt[id] : oldPrices[id]));
+  log.pnl = r1(pnl);
+  log.correct = log.pick === "real";
+  log.assetAfter = calcAsset(L.cash, L.holdings, newPrices);
+  log.realTitle = ROUNDS[round-1].real.title;
+}
+
+// ─────────────────────────────────────────────
+// 화면: 결과
+// ─────────────────────────────────────────────
+function showResult(round, isOffline){
+  const log = L.log[round] || {};
+  const R = ROUNDS[round-1];
+
+  const j = $("#rsJudge");
+  if(!log.confirmed){
+    j.className = "judge no"; j.textContent = "이번 라운드 매매 미확정 (관망 처리)";
+  } else if(log.correct){
+    j.className = "judge ok"; j.textContent = "🔍 뉴스 판별 성공! 진짜 신호를 골랐다";
+  } else {
+    j.className = "judge no"; j.textContent = "🔍 뉴스 판별 실패 — 더미에 속았다!";
+  }
+
+  // 뉴스 3장: 진짜 강조 + 더미 회색
+  const box = $("#rsNews"); box.innerHTML = "";
+  roundCards(round).forEach((c) => {
+    const div = document.createElement("div");
+    div.className = "news-card " + (c.isReal ? "real" : "dummy");
+    let inner = '<div class="tag">' + (c.isReal ? "🔔 시장을 움직인 뉴스" : "더미") + '</div><h3>'+c.title+'</h3>';
+    if(!c.isReal) inner += '<div class="noreact">시장 반응 없음 — '+c.whyNo+'</div>';
+    if(log.pick === c.key) inner += '<span class="pickmark">'+(c.isReal?"✔ 내 선택":"✘ 내 선택")+'</span>';
+    div.innerHTML = inner;
+    box.appendChild(div);
+  });
+  $("#rsNote").textContent = R.real.note;
+
+  // 손익
+  const pnl = log.pnl || 0;
+  const pe = $("#rsPnl");
+  pe.textContent = (pnl>0?"+":"") + fmtCoin(pnl) + " 코인";
+  pe.className = "pnl " + (pnl>0.001?"plus":pnl<-0.001?"minus":"");
+
+  // 가격 보드
+  renderPriceBoard($("#rsPrices"), L.prices, R.real.deltas, L.holdings);
+  const held = STOCK_IDS.filter(id => L.holdings[id]>0)
+    .map(id => STOCK_BY_ID[id].emoji + STOCK_BY_ID[id].name + " " + L.holdings[id] + "주");
+  $("#rsHold").textContent = held.length ? "보유: " + held.join(" · ") : "보유 종목 없음 (전량 현금)";
+
+  $("#rsWaitMsg").classList.toggle("hidden", !!isOffline);
+  $("#btnNextOffline").classList.toggle("hidden", !isOffline);
+  show("scrResult");
+  stopTimer();
+  renderTop();
+}
+
+function renderPriceBoard(el, prices, deltas, holdings){
+  el.innerHTML = "";
+  const maxP = Math.max(15, ...STOCK_IDS.map(id => prices[id]));
+  STOCKS.forEach(s => {
+    const d = deltas ? (deltas[s.id]||0) : 0;
+    const col = document.createElement("div");
+    col.className = "price-col " + (d>0?"up":d<0?"down":"flat");
+    const h = Math.max(4, prices[s.id]/maxP*100);
+    const heldMark = holdings && holdings[s.id]>0 ? " 🟡" : "";
+    col.innerHTML =
+      '<div class="barbox"><div class="bar" style="height:'+h+'%"></div></div>'+
+      '<div class="emoji">'+s.emoji+'</div><div class="nm">'+s.name+heldMark+'</div>'+
+      '<div class="pr">'+fmtCoin(prices[s.id])+'</div>'+
+      '<div class="delta">'+(deltas ? (d===0?"—":fmtPct(d)) : "")+'</div>';
+    el.appendChild(col);
+  });
+}
+
+// ─────────────────────────────────────────────
+// 오프라인 흐름 (뉴스 코드 모드)
+// ─────────────────────────────────────────────
+function enterOfflineFlow(){
+  renderConn();
+  if(L.round > GAME.totalRounds){ showReport(); return; }
+  if(L.offPhase === "trade"){
+    $("#codeRow").classList.add("hidden");
+    $("#offlineHint").textContent = "라운드 " + L.round + " — 뉴스를 읽고 매매를 확정하세요.";
+    showTrade(L.round, null);
+  } else if(L.offPhase === "code"){
+    $("#codeRow").classList.remove("hidden");
+    $("#offlineHint").textContent = "매매 확정 완료. 선생님이 시장을 공개하면 라운드 코드 R-" + L.round + " 를 입력하세요.";
+    showWait("🔑","라운드 코드를 기다리는 중","선생님 화면(전자칠판)의 코드를 위 입력란에 넣으세요.");
+  } else if(L.offPhase === "result"){
+    $("#codeRow").classList.add("hidden");
+    showResult(L.round, true);
+  }
+}
+
+$("#codeBtn").addEventListener("click", () => {
+  const raw = $("#codeInput").value.trim().toUpperCase();
+  const num = parseInt(raw.replace(/[^0-9]/g,""), 10);
+  if(num !== L.round){
+    alert("지금은 라운드 " + L.round + " 입니다. 코드 R-" + L.round + " 를 입력하세요.");
+    return;
+  }
+  const oldPrices = Object.assign({}, L.prices);
+  const newPrices = applyDeltas(L.prices, ROUNDS[L.round-1].real.deltas);
+  L.prices = newPrices;
+  finishRound(L.round, oldPrices, newPrices);
+  L.lastRevealedRound = Math.max(L.lastRevealedRound, L.round);
+  L.offPhase = "result";
+  $("#codeInput").value = "";
+  save();
+  enterOfflineFlow();
+});
+
+$("#btnNextOffline").addEventListener("click", () => {
+  L.round += 1;
+  L.offPhase = "trade";
+  save();
+  if(L.round > GAME.totalRounds) showReport();
+  else enterOfflineFlow();
+});
+
+// ─────────────────────────────────────────────
+// 최종 성적표
+// ─────────────────────────────────────────────
+function showReport(){
+  $("#rpName").textContent = "🏢 " + L.name;
+  const asset = calcAsset(L.cash, L.holdings, L.prices);
+  $("#rpAsset").textContent = fmtCoin(asset) + " 코인 (시작 100)";
+
+  let correct = 0, played = 0, best = null;
+  for(let r=1; r<=GAME.totalRounds; r++){
+    const lg = L.log[r];
+    if(lg && lg.confirmed){ played++; if(lg.correct) correct++; }
+    if(lg && typeof lg.pnl === "number" && (!best || lg.pnl > best.pnl)) best = {round:r, pnl:lg.pnl, reason:lg.reason};
+  }
+  let badges = '<span class="badge">🔍 뉴스 판별 정확도 ' + correct + "/" + GAME.totalRounds + '</span>';
+  if(best && best.pnl > 0)
+    badges += '<span class="badge">💥 최고의 한 방: R' + best.round + " +" + fmtCoin(best.pnl) + 'c</span>';
+  if(asset >= 200) badges += '<span class="badge">🏆 자산 2배 달성!</span>';
+  $("#rpBadges").innerHTML = badges;
+
+  const tl = $("#rpTimeline"); tl.innerHTML = "";
+  for(let r=1; r<=GAME.totalRounds; r++){
+    const lg = L.log[r];
+    const R = ROUNDS[r-1];
+    const div = document.createElement("div");
+    if(!lg){
+      div.className = "report-item";
+      div.innerHTML = '<div class="r-title">라운드 '+r+'</div><div class="r-line">기록 없음</div>';
+      tl.appendChild(div); continue;
+    }
+    div.className = "report-item " + (lg.correct ? "ok" : "no");
+    const trades = lg.trades && Object.keys(lg.trades).length
+      ? Object.entries(lg.trades).map(([id,n]) => STOCK_BY_ID[id].emoji + (n>0?"+":"")+n+"주").join(" ")
+      : "관망";
+    div.innerHTML =
+      '<div class="r-title">라운드 '+r+' — '+R.real.title+'</div>'+
+      '<div class="r-line">내가 고른 뉴스: <b>'+(lg.pickTitle||"미선택")+'</b> '+(lg.confirmed ? (lg.correct?"✔":"✘") : "")+'</div>'+
+      '<div class="r-line">매매: <b>'+trades+'</b> · 결과: <b>'+(lg.pnl>0?"+":"")+fmtCoin(lg.pnl||0)+'c</b></div>'+
+      '<div class="r-line">내 이유: "'+(lg.reason||"—")+'"</div>'+
+      '<div class="r-line">해설: '+R.real.note+'</div>';
+    tl.appendChild(div);
+  }
+  show("scrReport");
+  stopTimer();
+  renderTop();
+}
+
+$("#btnCopyReport").addEventListener("click", () => {
+  let t = "[로지스틱 익스체인지 성적표] " + L.name + "\n최종 자산: " + fmtCoin(calcAsset(L.cash,L.holdings,L.prices)) + "코인 (시작 100)\n";
+  for(let r=1; r<=GAME.totalRounds; r++){
+    const lg = L.log[r]; const R = ROUNDS[r-1];
+    t += "\nR"+r+" "+R.real.title+"\n";
+    if(lg){
+      t += " - 고른 뉴스: "+(lg.pickTitle||"미선택")+(lg.correct?" (정답)":" (오답)")+"\n";
+      t += " - 이유: "+(lg.reason||"-")+"\n";
+      t += " - 손익: "+(lg.pnl>0?"+":"")+fmtCoin(lg.pnl||0)+"코인\n";
+    } else t += " - 기록 없음\n";
+  }
+  navigator.clipboard.writeText(t)
+    .then(() => alert("복사 완료! 학습지에 붙여넣으세요."))
+    .catch(() => alert("복사가 안 되는 기기입니다. 스크린샷을 이용하세요."));
+});
+
+// ─────────────────────────────────────────────
+// 타이머
+// ─────────────────────────────────────────────
+function startTimer(endMs, el, chip){
+  stopTimer();
+  const tick = () => {
+    const s = Math.max(0, Math.ceil((endMs - Date.now())/1000));
+    el.textContent = s + "초";
+    el.className = "timer timer-sm" + (s<=10 ? " danger" : s<=20 ? " warn" : "");
+    if(chip){ chip.style.display=""; chip.textContent = "⏱ " + s + "초"; }
+    if(s<=0) stopTimer();
+  };
+  tick();
+  timerIv = setInterval(tick, 250);
+}
+function stopTimer(){ if(timerIv){ clearInterval(timerIv); timerIv=null; } $("#chipTimer").style.display="none"; }
+
+// ─────────────────────────────────────────────
+// 연결 상태 & 재연결 병합
+// ─────────────────────────────────────────────
+RT.onConn((on) => {
+  const was = online;
+  online = on;
+  renderConn();
+  if(!L.joined) {
+    $("#connTxt").textContent = on ? "실시간 연결" : "오프라인";
+    return;
+  }
+  if(on && L.live){
+    // 재연결: 로컬 자산을 서버에 병합
+    if(was === false && L.gid){
+      RT.update("rooms/"+L.room+"/groups/"+L.gid, { cash: L.cash, holdings: L.holdings })
+        .catch(e => console.error(e));
+    }
+    if(serverState) applyServerState(serverState);
+  } else if(!on){
+    // 연결 끊김 → 오프라인 흐름으로. 확정 전이면 계속 매매, 확정 후면 코드 대기
+    if(L.round <= GAME.totalRounds){
+      L.offPhase = (L.log[L.round] && L.log[L.round].confirmed) ? "code" : "trade";
+      if(L.lastRevealedRound >= L.round) L.offPhase = "result";
+      enterOfflineFlow();
+    }
+  }
+});
+
+// ─────────────────────────────────────────────
+// 시작
+// ─────────────────────────────────────────────
+load();
+RT.init();
+if(L.joined){
+  renderTop();
+  if(RT.enabled && L.live){
+    startWatching();
+    showWait("🔄","다시 연결하는 중…","저장된 모둠 정보로 게임을 이어갑니다.");
+  } else {
+    enterOfflineFlow();
+  }
+} else {
+  show("scrJoin");
+  if(!RT.enabled){
+    $("#joinMsg").textContent = "※ 서버 설정이 없어 오프라인(뉴스 코드) 모드로 시작합니다.";
+  }
+}
+renderConn();
+</script>
+</body>
+</html>
